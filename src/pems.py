@@ -45,6 +45,91 @@ def load_pems_5min(csv_path: str, postmile_col="Postmile", speed_col="Speed",
                       speed=sp.to_numpy(float), source=csv_path, flow=flow)
 
 
+# PeMS Data Clearinghouse "Station 5-Minute" files are headerless CSV; these are
+# the (0-based) column positions we need. Speed is col 11 (avg over lanes, mph).
+_STATION5MIN_COLS = {0: "timestamp", 1: "station", 3: "freeway",
+                     4: "direction", 5: "lane_type", 9: "flow", 11: "speed"}
+
+
+def load_clearinghouse_5min(path: str, lane_type: str | None = "ML") -> pd.DataFrame:
+    """Parse a raw PeMS clearinghouse station_5min .txt(.gz) into a tidy frame.
+
+    Returns columns [timestamp, station, freeway, direction, lane_type, flow, speed],
+    filtered to ``lane_type`` (default "ML" = mainline) and to rows with a speed.
+    Station id is the join key to the metadata file (postmile / lat-lon).
+    """
+    cols = sorted(_STATION5MIN_COLS)
+    df = pd.read_csv(path, header=None, usecols=cols,
+                     names=[_STATION5MIN_COLS[i] for i in cols], compression="infer")
+    if lane_type:
+        df = df[df["lane_type"] == lane_type]
+    df = df.dropna(subset=["speed"]).copy()
+    df["timestamp"] = pd.to_datetime(df["timestamp"], format="%m/%d/%Y %H:%M:%S")
+    df["station"] = df["station"].astype("int64")
+    return df.reset_index(drop=True)
+
+
+def load_meta(path: str, lane_type: str | None = "ML") -> pd.DataFrame:
+    """Load a PeMS station metadata file (tab-delimited) -> station geometry.
+
+    Returns [station, freeway, direction, abs_pm, lat, lon] for the given lane
+    type (default mainline). ``abs_pm`` is absolute postmile along the freeway.
+    """
+    m = pd.read_csv(path, sep="\t")
+    if lane_type:
+        m = m[m["Type"] == lane_type]
+    m = m[m["Latitude"].notna() & m["Longitude"].notna()]
+    out = m[["ID", "Fwy", "Dir", "Abs_PM", "Latitude", "Longitude"]].copy()
+    out.columns = ["station", "freeway", "direction", "abs_pm", "lat", "lon"]
+    return out.reset_index(drop=True)
+
+
+def build_corridor_field(speeds: pd.DataFrame, meta: pd.DataFrame,
+                         freeway: int, direction: str,
+                         start: str | None = None, end: str | None = None) -> SpeedField:
+    """Postmile x time speed field for one freeway+direction from clearinghouse data.
+
+    ``speeds`` is the tidy frame from :func:`load_clearinghouse_5min`; ``meta`` is
+    from :func:`load_meta`. Speeds are averaged per (postmile, 5-min) cell.
+    """
+    ms = meta[(meta["freeway"] == freeway) & (meta["direction"] == direction)]
+    sp = speeds[speeds["station"].isin(ms["station"])].merge(
+        ms[["station", "abs_pm"]], on="station")
+    grid = sp.pivot_table(index="timestamp", columns="abs_pm", values="speed",
+                          aggfunc="mean").sort_index().sort_index(axis=1)
+    if start or end:
+        grid = grid.loc[(grid.index >= (start or grid.index.min())) &
+                        (grid.index <= (end or grid.index.max()))]
+    return SpeedField(times=grid.index, postmiles=grid.columns.to_numpy(float),
+                      speed=grid.to_numpy(float),
+                      source=f"pems_d{int(meta['freeway'].iloc[0])//100 or ''}_fwy{freeway}{direction}")
+
+
+def drive_postmiles_on(trace: pd.DataFrame, meta: pd.DataFrame,
+                       freeway: int, direction: str, max_dist_m: float = 150.0) -> pd.DataFrame:
+    """Locate the trace along one freeway: nearest same-freeway/direction mainline
+    station gives each near-corridor point an absolute postmile.
+
+    Returns [t_local, abs_pm, dist_m, speed_mph] for points within ``max_dist_m``.
+    """
+    from scipy.spatial import cKDTree
+    ms = meta[(meta["freeway"] == freeway) & (meta["direction"] == direction)].reset_index(drop=True)
+    lat0 = float(ms["lat"].mean()); mpd = 111320.0
+    def xy(lat, lon):
+        return np.c_[lon * mpd * np.cos(np.radians(lat0)), lat * mpd]
+    tree = cKDTree(xy(ms["lat"].values, ms["lon"].values))
+    t = trace.copy()
+    t_local = t["time"].dt.tz_convert("America/Los_Angeles").dt.tz_localize(None)
+    dist, idx = tree.query(xy(t["lat"].values, t["lon"].values))
+    out = pd.DataFrame({
+        "t_local": t_local.to_numpy(),
+        "abs_pm": ms["abs_pm"].values[idx],
+        "dist_m": dist,
+        "speed_mph": t["speed_mph_s"].to_numpy(),
+    })
+    return out[out["dist_m"] <= max_dist_m].reset_index(drop=True)
+
+
 def synthetic_speed_field(
     length_mi: float,
     start="2026-09-13T05:00:00",
