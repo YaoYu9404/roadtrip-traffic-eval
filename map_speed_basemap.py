@@ -22,11 +22,22 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+from matplotlib.colors import LinearSegmentedColormap
 
 from src import gpx_io
 
 R = 6378137.0
 UA = {"User-Agent": "roadtrip-traffic-eval/1.0 (personal portfolio; contact via github)"}
+TILES = {  # (url template, attribution, image format)
+    "esri": ("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"
+             "World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+             "Tiles © Esri", "jpeg"),
+    "osm": ("https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+            "© OpenStreetMap contributors", "png"),
+}
+# slow = purple, fast = green (stays saturated on a light basemap; avoids white mid)
+PURPLE_GREEN = LinearSegmentedColormap.from_list(
+    "purple_green", ["#40004b", "#762a83", "#9970ab", "#7fbf7b", "#1b7837", "#00441b"])
 
 
 def merc(lat, lon):
@@ -49,7 +60,8 @@ def num2deg(x, y, z):
     return lat, lon
 
 
-def fetch_basemap(lat_min, lat_max, lon_min, lon_max, zoom):
+def fetch_basemap(lat_min, lat_max, lon_min, lon_max, zoom, tiles="esri"):
+    url_tmpl, _, fmt = TILES[tiles]
     x0, y0 = deg2num(lat_max, lon_min, zoom)   # top-left
     x1, y1 = deg2num(lat_min, lon_max, zoom)   # bottom-right
     xt0, xt1 = int(math.floor(x0)), int(math.floor(x1))
@@ -58,10 +70,12 @@ def fetch_basemap(lat_min, lat_max, lon_min, lon_max, zoom):
     canvas = np.ones(((ny) * 256, (nx) * 256, 3), float)
     for j, yt in enumerate(range(yt0, yt1 + 1)):
         for i, xt in enumerate(range(xt0, xt1 + 1)):
-            url = f"https://tile.openstreetmap.org/{zoom}/{xt}/{yt}.png"
+            url = url_tmpl.format(z=zoom, x=xt, y=yt)
             try:
                 data = urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=15).read()
-                tile = mpimg.imread(io.BytesIO(data), format="png")[..., :3]
+                tile = mpimg.imread(io.BytesIO(data), format=fmt)[..., :3].astype(float)
+                if tile.max() > 1.0:
+                    tile /= 255.0
                 canvas[j*256:(j+1)*256, i*256:(i+1)*256] = tile
             except Exception as e:
                 print(f"  tile {zoom}/{xt}/{yt} failed: {e}")
@@ -90,12 +104,16 @@ def main():
     ap.add_argument("--bbox", nargs=4, type=float, default=None,
                     metavar=("LATMIN", "LATMAX", "LONMIN", "LONMAX"))
     ap.add_argument("--zoom", type=int, default=None)
+    ap.add_argument("--tiles", choices=list(TILES), default="esri")
     ap.add_argument("--out", default="figures_compare/route_speed_basemap.png")
     args = ap.parse_args()
 
     frames = []
+    tot_mi = tot_min = 0.0
     for p in args.legs:
         t = gpx_io.load_trace(p)
+        tot_mi += float(t["dist_mi"].iloc[-1])
+        tot_min += (t["time"].iloc[-1] - t["time"].iloc[0]).total_seconds() / 60.0
         frames.append(t.loc[~t["long_gap"].fillna(False)])
     trip = __import__("pandas").concat(frames, ignore_index=True)
     lat = trip["lat"].to_numpy(); lon = trip["lon"].to_numpy()
@@ -113,7 +131,7 @@ def main():
 
     zoom = args.zoom or pick_zoom(la0, la1, lo0, lo1)
     print(f"[basemap] bbox lat {la0:.2f}..{la1:.2f} lon {lo0:.2f}..{lo1:.2f}  zoom {zoom}")
-    canvas, extent, ntiles = fetch_basemap(la0, la1, lo0, lo1, zoom)
+    canvas, extent, ntiles = fetch_basemap(la0, la1, lo0, lo1, zoom, args.tiles)
     print(f"[basemap] {ntiles} tiles stitched -> {canvas.shape}")
 
     mx, my = merc(lat, lon)
@@ -122,13 +140,20 @@ def main():
     aspect = (extent[3] - extent[2]) / (extent[1] - extent[0])
     fig, ax = plt.subplots(figsize=(fig_w, fig_w * aspect))
     ax.imshow(canvas, extent=extent, origin="upper", interpolation="bilinear")
-    sc = ax.scatter(mx[order], my[order], c=spd[order], cmap="RdYlGn",
-                    vmin=10, vmax=70, s=7, linewidths=0)
+    sc = ax.scatter(mx[order], my[order], c=spd[order], cmap=PURPLE_GREEN,
+                    vmin=10, vmax=70, s=8, linewidths=0)
     cb = fig.colorbar(sc, ax=ax, shrink=0.55, pad=0.01); cb.set_label("GPS speed (mph)")
     ax.set_xlim(merc(la0, lo0)[0], merc(la0, lo1)[0])
     ax.set_ylim(merc(la0, lo0)[1], merc(la1, lo0)[1])
     ax.set_xticks([]); ax.set_yticks([])
-    ax.set_title("Road-trip speed on OpenStreetMap  (© OpenStreetMap contributors)", fontsize=11)
+
+    # total distance + time on the road
+    ax.text(0.03, 0.05, f"{tot_mi:.0f} mi  ·  {tot_min/60:.1f} h driving  ·  2 days",
+            transform=ax.transAxes, fontsize=12, fontweight="bold", color="#2a2a2a",
+            va="bottom", ha="left",
+            bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#999", alpha=0.9))
+    ax.set_title(f"Road-trip speed  —  San Diego → Cupertino   ({TILES[args.tiles][1]})",
+                 fontsize=11)
     fig.tight_layout()
 
     out = Path(args.out); out.parent.mkdir(exist_ok=True)
