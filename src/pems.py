@@ -130,6 +130,55 @@ def drive_postmiles_on(trace: pd.DataFrame, meta: pd.DataFrame,
     return out[out["dist_m"] <= max_dist_m].reset_index(drop=True)
 
 
+def match_trace_to_pems(trace: pd.DataFrame, meta: pd.DataFrame, speeds: pd.DataFrame,
+                        max_dist_m: float = 150.0, dir_aware: bool = True) -> pd.DataFrame:
+    """Attach the nearest mainline PeMS speed (same 5-min bin) to every trace point.
+
+    ``meta`` may span multiple districts (from :func:`load_meta`); ``speeds`` from
+    :func:`load_clearinghouse_5min`. When ``dir_aware`` the nearest station must
+    share the vehicle's travel direction (N/S/E/W from local heading), which keeps
+    opposite-carriageway stations from being matched. Points whose nearest matching
+    station is beyond ``max_dist_m`` (ramps, surface streets, stops) get NaN.
+    Returns ``trace`` plus columns ``pems_speed`` and ``pems_dist_m``.
+    """
+    from scipy.spatial import cKDTree
+    t = trace.copy()
+    tl = t["time"].dt.tz_convert("America/Los_Angeles").dt.tz_localize(None)
+    lat, lon = t["lat"].to_numpy(), t["lon"].to_numpy()
+    c = np.cos(np.radians(float(np.nanmean(lat))))
+    dlat = pd.Series(lat).diff(8).to_numpy()
+    dlon = pd.Series(lon).diff(8).to_numpy()
+    ddir = np.where(np.abs(dlat) > np.abs(dlon * c),
+                    np.where(dlat > 0, "N", "S"), np.where(dlon > 0, "E", "W"))
+
+    lat0 = float(meta["lat"].mean()); mpd = 111320.0
+    def xy(la, lo):
+        return np.c_[lo * mpd * np.cos(np.radians(lat0)), la * mpd]
+
+    station = np.full(len(t), -1, np.int64)
+    dist = np.full(len(t), np.inf)
+    if dir_aware:
+        for dd in ["N", "S", "E", "W"]:
+            sub = meta[meta["direction"] == dd]
+            m = ddir == dd
+            if len(sub) == 0 or m.sum() == 0:
+                continue
+            tree = cKDTree(xy(sub["lat"].values, sub["lon"].values))
+            di, idx = tree.query(xy(lat[m], lon[m]))
+            station[m] = sub["station"].values[idx]
+            dist[m] = di
+    else:
+        tree = cKDTree(xy(meta["lat"].values, meta["lon"].values))
+        dist, idx = tree.query(xy(lat, lon))
+        station = meta["station"].values[idx]
+
+    key = speeds.set_index(["station", "timestamp"])["speed"]
+    ps = key.reindex(pd.MultiIndex.from_arrays([pd.Series(station), tl.dt.floor("5min")])).to_numpy()
+    t["pems_speed"] = np.where(dist <= max_dist_m, ps, np.nan)
+    t["pems_dist_m"] = dist
+    return t
+
+
 def synthetic_speed_field(
     length_mi: float,
     start="2026-09-13T05:00:00",
