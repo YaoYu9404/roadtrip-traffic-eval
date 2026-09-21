@@ -87,6 +87,27 @@ def fetch_basemap(lat_min, lat_max, lon_min, lon_max, zoom, tiles="esri"):
     return canvas, (xl, xr, yb, yt), (nx * ny)
 
 
+def flatten_ocean(canvas, sea_rgb=(170/255, 211/255, 223/255), tol=0.08):
+    """Repaint the sea a flat colour, erasing depth/marine-boundary lines drawn
+    over water in OSM tiles.
+
+    1. find clearly-sea pixels by colour; close+fill to get the whole ocean region
+       (this dilates a little onto land and over the Channel Islands / boundary lines).
+    2. inside that region, repaint only water- or line-coloured pixels (blue >= green),
+       which leaves green/tan land — including coastal land pulled in by the dilation —
+       untouched.
+    """
+    from scipy.ndimage import binary_closing, binary_opening, binary_fill_holes
+    sea = np.array(sea_rgb)
+    seed = np.abs(canvas - sea).sum(axis=2) < tol
+    ocean = binary_fill_holes(binary_closing(seed, structure=np.ones((9, 9))))
+    bluish = canvas[:, :, 2] >= canvas[:, :, 1] - 0.02       # sea + purple/grey lines
+    nonsea = ~bluish
+    thin = nonsea & ~binary_opening(nonsea, structure=np.ones((4, 4)))  # lines/labels, not islands
+    canvas[ocean & (bluish | thin)] = sea                   # keep solid landmasses (islands, coast)
+    return canvas
+
+
 def pick_zoom(lat_min, lat_max, lon_min, lon_max, max_tiles=80):
     for z in range(12, 4, -1):
         x0, y0 = deg2num(lat_max, lon_min, z)
@@ -104,7 +125,9 @@ def main():
     ap.add_argument("--bbox", nargs=4, type=float, default=None,
                     metavar=("LATMIN", "LATMAX", "LONMIN", "LONMAX"))
     ap.add_argument("--zoom", type=int, default=None)
-    ap.add_argument("--tiles", choices=list(TILES), default="esri")
+    ap.add_argument("--tiles", choices=list(TILES), default="osm")
+    ap.add_argument("--no-flatten-ocean", action="store_true",
+                    help="keep the OSM ocean depth/boundary lines instead of flattening them")
     ap.add_argument("--out", default="figures_compare/route_speed_basemap.png")
     args = ap.parse_args()
 
@@ -132,6 +155,8 @@ def main():
     zoom = args.zoom or pick_zoom(la0, la1, lo0, lo1)
     print(f"[basemap] bbox lat {la0:.2f}..{la1:.2f} lon {lo0:.2f}..{lo1:.2f}  zoom {zoom}")
     canvas, extent, ntiles = fetch_basemap(la0, la1, lo0, lo1, zoom, args.tiles)
+    if args.tiles == "osm" and not args.no_flatten_ocean:
+        canvas = flatten_ocean(canvas)
     print(f"[basemap] {ntiles} tiles stitched -> {canvas.shape}")
 
     mx, my = merc(lat, lon)
