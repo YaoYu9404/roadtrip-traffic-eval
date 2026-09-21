@@ -1,0 +1,16 @@
+# Analysis configuration. All values have sensible defaults in run.py;
+# edit here to override without touching code.
+
+events:
+  hard_brake_decel_mps2: -3.0     # deceleration threshold for a "hard brake"
+  congestion_slow_mph: 30.0       # speed defining "in congestion"
+  congestion_free_mph: 55.0       # must have been at/above this just before onset
+
+travel_time:
+  leg2_assumed_speed_mph: 62.0    # prior for the Templeton->Cupertino prediction
+
+pems:
+  # For real data, export Station 5-Minute CSV from PeMS for the US-101 corridor
+  # and pass it with:  python run.py --gpx ... --pems data/pems/us101.csv
+  start: "2026-09-13T05:00:00"
+  end:   "2026-09-13T11:00:00"
