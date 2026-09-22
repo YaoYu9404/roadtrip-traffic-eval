@@ -97,7 +97,7 @@ def main():
     # map
     axm.imshow(canvas, extent=extent, origin="upper", interpolation="bilinear")
     mx, myy = merc(lat, lon); order = np.argsort(-spd)
-    sc = axm.scatter(mx[order], myy[order], c=spd[order], cmap=PURPLE_GREEN, vmin=10, vmax=70, s=6, linewidths=0)
+    sc = axm.scatter(mx[order], myy[order], c=spd[order], cmap="PRGn", vmin=10, vmax=70, s=6, linewidths=0)
     cb = fig.colorbar(sc, ax=axm, shrink=0.5, pad=0.01); cb.set_label("GPS speed (mph)", fontsize=9)
     axm.set_xlim(merc(la0, lo0)[0], merc(la0, lo1)[0]); axm.set_ylim(merc(la0, lo0)[1], merc(la1, lo0)[1])
     axm.set_xticks([]); axm.set_yticks([])
