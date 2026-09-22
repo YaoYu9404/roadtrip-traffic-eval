@@ -71,19 +71,20 @@ def main():
     zoom = pick_zoom(la0, la1, lo0, lo1)
     canvas, extent, _ = fetch_basemap(la0, la1, lo0, lo1, zoom, "osm"); canvas = flatten_ocean(canvas)
 
-    # --- layout: map (left) + speed distribution (top-right) + ride comfort (bottom-right) ---
-    fig = plt.figure(figsize=(16, 9.5))
-    gs = fig.add_gridspec(2, 2, width_ratios=[1.15, 1.0], height_ratios=[1.0, 1.0],
-                          wspace=0.14, hspace=0.34)
-    axm = fig.add_subplot(gs[:, 0])
-    ax_top = fig.add_subplot(gs[0, 1]); ax_bot = fig.add_subplot(gs[1, 1])
+    # --- layout: big map + horizontal colorbar (left), speed dist + comfort (right) ---
+    fig = plt.figure(figsize=(17, 11))
+    outer = fig.add_gridspec(1, 2, width_ratios=[1.24, 1.0], wspace=0.12)
+    left = outer[0, 0].subgridspec(2, 1, height_ratios=[40, 1], hspace=0.04)
+    axm = fig.add_subplot(left[0]); axcb = fig.add_subplot(left[1])
+    right = outer[0, 1].subgridspec(2, 1, hspace=0.34)
+    ax_top = fig.add_subplot(right[0]); ax_bot = fig.add_subplot(right[1])
 
     # map
     axm.imshow(canvas, extent=extent, origin="upper", interpolation="bilinear")
     mx, myy = merc(lat, lon); order = np.argsort(-spd)
     sc = axm.scatter(mx[order], myy[order], c=spd[order], cmap="PRGn", vmin=10, vmax=70, s=6, linewidths=0)
-    cb = fig.colorbar(sc, ax=axm, shrink=0.85, pad=0.015); cb.set_label("GPS speed (mph)", fontsize=9)
-    cb.ax.tick_params(labelsize=8)
+    cb = fig.colorbar(sc, cax=axcb, orientation="horizontal")
+    cb.set_label("GPS speed (mph)", fontsize=9.5); cb.ax.tick_params(labelsize=8)
     axm.set_xlim(merc(la0, lo0)[0], merc(la0, lo1)[0]); axm.set_ylim(merc(la0, lo0)[1], merc(la1, lo0)[1])
     axm.set_xticks([]); axm.set_yticks([])
     # city labels at the (trimmed) route ends
