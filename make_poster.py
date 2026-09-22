@@ -15,6 +15,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from scipy import stats
 
 from src import gpx_io
 from src.comfort import add_dynamics
@@ -25,8 +26,9 @@ from src.basemap import fetch_basemap, flatten_ocean, pick_zoom, merc, TILES
 from map_speed_basemap import PURPLE_GREEN
 
 _A, _B = "#1f6f8b", "#e08a1e"
-_HW, _LA = "#6d6875", "#c0492f"
-LA_BOX = dict(lat=(33.6, 34.4), lon=(-118.7, -117.6))
+BANDS = [(0, 5, "stopped"), (5, 45, "congested"), (45, 65, "moderate"),
+         (65, 75, "cruise"), (75, 90, "fast")]
+BAND_C = ["#6d6875", "#c0492f", "#caa233", "#2a9d8f", "#1f6f8b"]
 
 
 def load_dyn(stems):
@@ -52,12 +54,11 @@ def main():
     lat, lon, spd = trip["lat"].to_numpy(), trip["lon"].to_numpy(), trip["speed_mph_s"].to_numpy()
     ok = np.isfinite(spd); lat, lon, spd = lat[ok], lon[ok], spd[ok]
 
-    # for the public map: trim ~4 km off each end (hide home/destination) and drop
-    # the LA basin. (Analysis panels below still use the full data.)
+    # for the public map: trim ~4 km off each end (hide home/destination); keep all
+    # segments including LA.
     d_start = haversine_m(lat[0], lon[0], lat, lon)
     d_end = haversine_m(lat[-1], lon[-1], lat, lon)
-    in_la = (lat >= 33.6) & (lat <= 34.4) & (lon >= -118.7) & (lon <= -117.6)
-    keep = (d_start > 4000) & (d_end > 4000) & ~in_la
+    keep = (d_start > 4000) & (d_end > 4000)
     lat, lon, spd = lat[keep], lon[keep], spd[keep]
 
     cs, ks = gpx_io.load_trace("data/raw/civic_sat.gpx"), gpx_io.load_trace("data/raw/crosstrek_sat.gpx")
@@ -71,15 +72,6 @@ def main():
 
     yao, fer = load_dyn(["civic_sat", "civic_sun"]), load_dyn(["crosstrek_sat", "crosstrek_sun"])
     my, mf = metrics(yao), metrics(fer)
-    both = pd.concat([yao, fer], ignore_index=True)
-    la = both["lat"].between(*LA_BOX["lat"]) & both["lon"].between(*LA_BOX["lon"])
-
-    def seg(d):
-        a, j = d["accel_g"].to_numpy(), d["jerk_g_s"].to_numpy()
-        return {"peak braking": -np.percentile(a, 1), "accel var.": np.std(a),
-                "jerk RMS": np.sqrt(np.nanmean(j ** 2)), "harsh %": 100*np.mean(np.abs(a) > 0.15)}
-    hw, laa = seg(both[~la]), seg(both[la])
-    keys = list(hw)
 
     # --- basemap ---
     pad = 0.08
@@ -113,7 +105,7 @@ def main():
         ("6,477 PeMS sensors", "validated vs Caltrans traffic field"),
         ("17 → 0 hard brakes", "naive detections were GPS spikes"),
         ("Fernando smoother 4/4", "same speed, ~20% less jerk"),
-        ("LA traffic: 4.3× harsher", "same drivers, more harsh maneuvers"),
+        ("3.9 h at 65–75 mph", "mostly highway cruise (see distribution)"),
     ]
     axm.text(0.46, 0.955, "KEY FINDINGS", transform=axm.transAxes, fontsize=12.5, fontweight="bold",
              va="top", bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#888", alpha=0.92))
@@ -147,17 +139,21 @@ def main():
     ax2.text(1.03, 0.5, txt, transform=ax2.transAxes, fontsize=8, va="center",
              bbox=dict(boxstyle="round,pad=0.4", fc="#f7f7f7", ec="#ccc"))
 
-    # highway vs LA
-    x = np.arange(len(keys)); wbar = 0.38
-    ax3.bar(x - wbar/2, [1.0]*len(keys), wbar, color=_HW, label="open highway")
-    ax3.bar(x + wbar/2, [laa[k]/hw[k] for k in keys], wbar, color=_LA, label="LA basin")
-    for xi, k in enumerate(keys):
-        ax3.text(xi + wbar/2, laa[k]/hw[k], f"×{laa[k]/hw[k]:.1f}", ha="center", va="bottom",
-                 fontsize=9, fontweight="bold", color=_LA)
-    ax3.set_xticks(x); ax3.set_xticklabels(keys, fontsize=9)
-    ax3.set_ylabel("rel. to highway (=1)", fontsize=9); ax3.set_ylim(0, 5.2)
-    ax3.set_title("Same drivers get 1.4–4.3× rougher in LA traffic", fontsize=10)
-    ax3.legend(loc="upper left", fontsize=8)
+    # speed distribution + hours per band
+    grid = np.linspace(0, 90, 300)
+    for d, c, name in [(yao, _A, "Yao (Civic)"), (fer, _B, "Fernando (Crosstrek)")]:
+        k = stats.gaussian_kde(d["speed_mph_s"], weights=d["w"])
+        ax3.plot(grid, k(grid), color=c, lw=1.8, label=name); ax3.fill_between(grid, k(grid), color=c, alpha=0.10)
+    for (lo, hi, _), cc in zip(BANDS, BAND_C):
+        ax3.axvspan(lo, hi, color=cc, alpha=0.06)
+    ax3.set_ylim(0, 0.079); ax3.set_xlim(0, 90)
+    for (lo, hi, nm), cc in zip(BANDS, BAND_C):
+        hrs = yao.loc[(yao["speed_mph_s"] >= lo) & (yao["speed_mph_s"] < hi), "w"].sum()/3600
+        ax3.text((lo+min(hi, 90))/2, 0.074, f"{nm}\n{hrs:.1f} h", ha="center", va="top",
+                 fontsize=8, color=cc, fontweight="bold")
+    ax3.set_xlabel("speed (mph, drive-time weighted)", fontsize=9); ax3.set_ylabel("density", fontsize=9)
+    ax3.set_title("Speed distribution — hours spent in each band", fontsize=10)
+    ax3.legend(fontsize=8, loc="center left")
 
     fig.suptitle("500 miles, two cars, two phones — what consumer GPS reveals about a road trip",
                  fontsize=16, fontweight="bold", y=0.995)
