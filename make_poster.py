@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 
 from src import gpx_io
 from src.comfort import add_dynamics
+from src.geo import haversine_m
 from src.route import Route
 from src.traces import align_dual
 from src.basemap import fetch_basemap, flatten_ocean, pick_zoom, merc, TILES
@@ -50,6 +51,14 @@ def main():
     trip = pd.concat(frames, ignore_index=True)
     lat, lon, spd = trip["lat"].to_numpy(), trip["lon"].to_numpy(), trip["speed_mph_s"].to_numpy()
     ok = np.isfinite(spd); lat, lon, spd = lat[ok], lon[ok], spd[ok]
+
+    # for the public map: trim ~4 km off each end (hide home/destination) and drop
+    # the LA basin. (Analysis panels below still use the full data.)
+    d_start = haversine_m(lat[0], lon[0], lat, lon)
+    d_end = haversine_m(lat[-1], lon[-1], lat, lon)
+    in_la = (lat >= 33.6) & (lat <= 34.4) & (lon >= -118.7) & (lon <= -117.6)
+    keep = (d_start > 4000) & (d_end > 4000) & ~in_la
+    lat, lon, spd = lat[keep], lon[keep], spd[keep]
 
     cs, ks = gpx_io.load_trace("data/raw/civic_sat.gpx"), gpx_io.load_trace("data/raw/crosstrek_sat.gpx")
     cu, ku = gpx_io.load_trace("data/raw/civic_sun.gpx"), gpx_io.load_trace("data/raw/crosstrek_sun.gpx")
