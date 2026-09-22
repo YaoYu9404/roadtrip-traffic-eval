@@ -60,6 +60,7 @@ def main():
     d_end = haversine_m(lat[-1], lon[-1], lat, lon)
     keep = (d_start > 4000) & (d_end > 4000)
     lat, lon, spd = lat[keep], lon[keep], spd[keep]
+    sd_pt, cup_pt = (lat[0], lon[0]), (lat[-1], lon[-1])   # trimmed route ends (near SD / Cupertino)
 
     yao, fer = load_dyn(["civic_sat", "civic_sun"]), load_dyn(["crosstrek_sat", "crosstrek_sun"])
     my, mf = metrics(yao), metrics(fer)
@@ -71,9 +72,9 @@ def main():
     canvas, extent, _ = fetch_basemap(la0, la1, lo0, lo1, zoom, "osm"); canvas = flatten_ocean(canvas)
 
     # --- layout: map (left) + speed distribution (top-right) + ride comfort (bottom-right) ---
-    fig = plt.figure(figsize=(16, 11))
-    gs = fig.add_gridspec(2, 2, width_ratios=[1.0, 1.08], height_ratios=[1.0, 1.0],
-                          wspace=0.16, hspace=0.34)
+    fig = plt.figure(figsize=(16, 9.5))
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.15, 1.0], height_ratios=[1.0, 1.0],
+                          wspace=0.14, hspace=0.34)
     axm = fig.add_subplot(gs[:, 0])
     ax_top = fig.add_subplot(gs[0, 1]); ax_bot = fig.add_subplot(gs[1, 1])
 
@@ -81,9 +82,18 @@ def main():
     axm.imshow(canvas, extent=extent, origin="upper", interpolation="bilinear")
     mx, myy = merc(lat, lon); order = np.argsort(-spd)
     sc = axm.scatter(mx[order], myy[order], c=spd[order], cmap="PRGn", vmin=10, vmax=70, s=6, linewidths=0)
-    cb = fig.colorbar(sc, ax=axm, shrink=0.5, pad=0.01); cb.set_label("GPS speed (mph)", fontsize=9)
+    cb = fig.colorbar(sc, ax=axm, shrink=0.85, pad=0.015); cb.set_label("GPS speed (mph)", fontsize=9)
+    cb.ax.tick_params(labelsize=8)
     axm.set_xlim(merc(la0, lo0)[0], merc(la0, lo1)[0]); axm.set_ylim(merc(la0, lo0)[1], merc(la1, lo0)[1])
     axm.set_xticks([]); axm.set_yticks([])
+    # city labels at the (trimmed) route ends
+    for nm, (cla, clo), off, ha in [("San Diego", sd_pt, (-9, 6), "right"),
+                                    ("Cupertino", cup_pt, (9, -4), "left")]:
+        cxx, cyy = merc(cla, clo)
+        axm.plot(cxx, cyy, "o", ms=6, color="#111", zorder=6)
+        axm.annotate(nm, (cxx, cyy), textcoords="offset points", xytext=off, ha=ha,
+                     fontsize=10, fontweight="bold", zorder=6,
+                     bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85))
     axm.text(0.03, 0.03, f"{tot_mi:.0f} mi · {tot_min/60:.1f} h driving · 2 days", transform=axm.transAxes,
              fontsize=11, fontweight="bold", va="bottom",
              bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#999", alpha=0.9))
