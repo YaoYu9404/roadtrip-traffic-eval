@@ -104,16 +104,13 @@ def main():
                      fontsize=10, fontweight="bold", zorder=6,
                      bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85))
     # Saturday rest stops (numbered) + overnight star, with a key in the empty inland area
-    REASONS = {"Long Beach": "pee break", "Woodland Hills": "In-N-Out (nope!)",
-               "Thousand Oaks": "In-N-Out (finally!)"}
-    key_lines = ["Stops (Saturday) — dwell time tells the story:"]
+    key_lines = ["Rest stops (Saturday):"]
     for i, (s, e, la, lo) in enumerate(stops, 1):
         gx, gy = merc(la, lo)
         axm.plot(gx, gy, "o", ms=13, color="#e08a1e", mec="white", mew=1.2, zorder=7)
         axm.text(gx, gy, str(i), ha="center", va="center", fontsize=8, fontweight="bold",
                  color="white", zorder=8)
-        pl = nearest(la, lo)
-        key_lines.append(f"{i}  {pl} — {REASONS.get(pl, '')}  ({(e-s).total_seconds()/60:.0f} min)")
+        key_lines.append(f"{i}  {nearest(la, lo)}  ({(e-s).total_seconds()/60:.0f} min)")
     tx, ty = merc(*templeton)
     axm.plot(tx, ty, "*", ms=17, color="#c0492f", mec="white", mew=0.8, zorder=7)
     axm.annotate("Templeton\n(overnight)", (tx, ty), textcoords="offset points", xytext=(9, 0),
@@ -143,18 +140,19 @@ def main():
     ax_top.set_title("Speed distribution — hours spent in each band", fontsize=11.5)
     ax_top.legend(fontsize=9, loc="center left")
 
-    # ride comfort g-g + scorecard (bottom-right)
-    for d, c in [(yao, _A), (fer, _B)]:
-        ax_bot.scatter(d["lat_g_signed"], d["accel_g"], s=1.5, alpha=0.10, color=c)
-    for rr, c in [(0.15, "#2a9d8f"), (0.30, "#c0492f")]:
-        th = np.linspace(0, 2*np.pi, 100); ax_bot.plot(rr*np.cos(th), rr*np.sin(th), color=c, lw=1)
-    ax_bot.set_xlim(-0.45, 0.45); ax_bot.set_ylim(-0.45, 0.45); ax_bot.set_aspect("equal")
-    ax_bot.set_xlabel("lateral g", fontsize=9.5); ax_bot.set_ylabel("accel / brake g", fontsize=9.5)
-    ax_bot.set_title("Ride comfort — g-g envelope (rings 0.15 / 0.30 g)", fontsize=11.5)
-    txt = "Fernando smoother on all 4:\n" + "\n".join(
-        f"  {k}: Yao {100*my[k]/mf[k]:.0f}% of Fer" for k in my)
-    ax_bot.text(1.03, 0.5, txt, transform=ax_bot.transAxes, fontsize=8.5, va="center",
-                bbox=dict(boxstyle="round,pad=0.4", fc="#f7f7f7", ec="#ccc"))
+    # ride comfort — smoothness scorecard (bottom-right); bars are far easier to read
+    keys = list(my)
+    ypos = np.arange(len(keys))[::-1]
+    for i, k in enumerate(keys):
+        yi = ypos[i]; vmax = max(my[k], mf[k])
+        ax_bot.barh(yi + 0.2, my[k] / vmax, 0.36, color=_A)
+        ax_bot.barh(yi - 0.2, mf[k] / vmax, 0.36, color=_B)
+        ax_bot.text(my[k] / vmax + 0.02, yi + 0.2, f"{my[k]:.3g}", va="center", fontsize=9, color=_A)
+        ax_bot.text(mf[k] / vmax + 0.02, yi - 0.2, f"{mf[k]:.3g}", va="center", fontsize=9, color=_B)
+    ax_bot.set_yticks(ypos); ax_bot.set_yticklabels([k.replace(" (%)", " %") for k in keys], fontsize=10)
+    ax_bot.set_xlim(0, 1.32); ax_bot.set_xticks([])
+    ax_bot.set_title("Ride comfort — Fernando smoother on all 4  (blue = Yao, orange = Fernando; "
+                     "shorter = smoother)", fontsize=10.5)
 
     # combined speed plot (both days, along route distance) — full width, bottom
     sat_f, sun_f = frames
