@@ -83,7 +83,7 @@ def main():
     topgs = outer[0].subgridspec(1, 2, width_ratios=[1.24, 1.0], wspace=0.12)
     left = topgs[0, 0].subgridspec(2, 1, height_ratios=[40, 1], hspace=0.04)
     axm = fig.add_subplot(left[0]); axcb = fig.add_subplot(left[1])
-    right = topgs[0, 1].subgridspec(2, 1, hspace=0.34)
+    right = topgs[0, 1].subgridspec(2, 1, height_ratios=[1.6, 1.0], hspace=0.34)
     ax_top = fig.add_subplot(right[0]); ax_bot = fig.add_subplot(right[1])
     ax_tl = fig.add_subplot(outer[1])
 
