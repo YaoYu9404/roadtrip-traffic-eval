@@ -14,7 +14,38 @@ intervals, and (optionally) scores a traffic *simulation* against reality.
 > evaluation frameworks, metrics for complex systems, rare-event rate estimation,
 > and combining real with synthetic data.
 
-<p align="center"><img src="figures/01_speed_contour.png" width="760"></p>
+<p align="center"><img src="assets/roadtrip_poster.png" width="920"></p>
+
+## Results — from a real 500-mile drive
+
+A few of the analyses behind the summary above (map figures have their endpoints
+trimmed for privacy; raw GPS traces and PeMS files are not included in the repo):
+
+**Ride comfort & driver comparison** — longitudinal + lateral g and jerk, as a g-g
+"friction circle." Both drivers stayed well inside comfort limits; one was
+consistently ~20% smoother (less jerk) at the same speed.
+
+<p align="center"><img src="assets/speed_comfort.png" width="820"></p>
+
+**ETA validation** — a naive free-flow ETA underestimated the congested LA corridor
+by 44 min; integrating the live Caltrans PeMS traffic field cut the error to 18 min
+(~60%).
+
+<p align="center"><img src="assets/eta_validation.png" width="760"></p>
+
+**Drive vs. the live traffic field** — the drive overlaid on the I-405 PeMS
+space-time speed contour; the driver's slowdowns line up with the
+sensor-measured congestion (the Sepulveda Pass bottleneck).
+
+<p align="center"><img src="assets/pems_corridor_405N.png" width="760"></p>
+
+**A trip is drive + dwell** — rest stops detected straight from GPS; dwell time
+distinguishes a real stop from an aborted one.
+
+<p align="center"><img src="assets/trip_timeline.png" width="820"></p>
+
+More figures (speed distribution, elevation/grade, two-car divergence,
+highway-vs-LA comfort) are in [`assets/`](assets/).
 
 ## What it produces
 
