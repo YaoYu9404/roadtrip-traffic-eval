@@ -104,13 +104,16 @@ def main():
                      fontsize=10, fontweight="bold", zorder=6,
                      bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85))
     # Saturday rest stops (numbered) + overnight star, with a key in the empty inland area
-    key_lines = ["Stops (Saturday):"]
+    REASONS = {"Long Beach": "pee break", "Woodland Hills": "In-N-Out (nope!)",
+               "Thousand Oaks": "In-N-Out (finally!)"}
+    key_lines = ["Stops (Saturday) — dwell time tells the story:"]
     for i, (s, e, la, lo) in enumerate(stops, 1):
         gx, gy = merc(la, lo)
         axm.plot(gx, gy, "o", ms=13, color="#e08a1e", mec="white", mew=1.2, zorder=7)
         axm.text(gx, gy, str(i), ha="center", va="center", fontsize=8, fontweight="bold",
                  color="white", zorder=8)
-        key_lines.append(f"{i}  {nearest(la, lo)} · {(e-s).total_seconds()/60:.0f} min")
+        pl = nearest(la, lo)
+        key_lines.append(f"{i}  {pl} — {REASONS.get(pl, '')}  ({(e-s).total_seconds()/60:.0f} min)")
     tx, ty = merc(*templeton)
     axm.plot(tx, ty, "*", ms=17, color="#c0492f", mec="white", mew=0.8, zorder=7)
     axm.annotate("Templeton\n(overnight)", (tx, ty), textcoords="offset points", xytext=(9, 0),
