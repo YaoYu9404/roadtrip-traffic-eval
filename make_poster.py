@@ -24,6 +24,7 @@ from src.route import Route
 from src.traces import align_dual
 from src.basemap import fetch_basemap, flatten_ocean, pick_zoom, merc, TILES
 from map_speed_basemap import PURPLE_GREEN
+from analyze_timeline import find_breaks, nearest, load as load_leg
 
 _A, _B = "#1f6f8b", "#e08a1e"
 BANDS = [(0, 5, "stopped"), (5, 45, "congested"), (45, 65, "moderate"),
@@ -65,19 +66,26 @@ def main():
     yao, fer = load_dyn(["civic_sat", "civic_sun"]), load_dyn(["crosstrek_sat", "crosstrek_sun"])
     my, mf = metrics(yao), metrics(fer)
 
+    # Saturday rest stops + overnight (Templeton = end of the Saturday leg)
+    sat_raw = load_leg("civic_sat")
+    stops = [b for b in find_breaks(sat_raw) if (sat_raw["tl"].iloc[-1] - b[1]).total_seconds() > 90]
+    templeton = (float(sat_raw["lat"].iloc[-1]), float(sat_raw["lon"].iloc[-1]))
+
     # --- basemap ---
     pad = 0.08
     la0, la1, lo0, lo1 = lat.min()-pad, lat.max()+pad, lon.min()-pad, lon.max()+pad
     zoom = pick_zoom(la0, la1, lo0, lo1)
     canvas, extent, _ = fetch_basemap(la0, la1, lo0, lo1, zoom, "osm"); canvas = flatten_ocean(canvas)
 
-    # --- layout: big map + horizontal colorbar (left), speed dist + comfort (right) ---
-    fig = plt.figure(figsize=(17, 11))
-    outer = fig.add_gridspec(1, 2, width_ratios=[1.24, 1.0], wspace=0.12)
-    left = outer[0, 0].subgridspec(2, 1, height_ratios=[40, 1], hspace=0.04)
+    # --- layout: map + right panels on top, full-width speed plot along the bottom ---
+    fig = plt.figure(figsize=(17, 13))
+    outer = fig.add_gridspec(2, 1, height_ratios=[3.0, 1.0], hspace=0.16)
+    topgs = outer[0].subgridspec(1, 2, width_ratios=[1.24, 1.0], wspace=0.12)
+    left = topgs[0, 0].subgridspec(2, 1, height_ratios=[40, 1], hspace=0.04)
     axm = fig.add_subplot(left[0]); axcb = fig.add_subplot(left[1])
-    right = outer[0, 1].subgridspec(2, 1, hspace=0.34)
+    right = topgs[0, 1].subgridspec(2, 1, hspace=0.34)
     ax_top = fig.add_subplot(right[0]); ax_bot = fig.add_subplot(right[1])
+    ax_tl = fig.add_subplot(outer[1])
 
     # map
     axm.imshow(canvas, extent=extent, origin="upper", interpolation="bilinear")
@@ -95,6 +103,22 @@ def main():
         axm.annotate(nm, (cxx, cyy), textcoords="offset points", xytext=off, ha=ha,
                      fontsize=10, fontweight="bold", zorder=6,
                      bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85))
+    # Saturday rest stops (numbered) + overnight star, with a key in the empty inland area
+    key_lines = ["Stops (Saturday):"]
+    for i, (s, e, la, lo) in enumerate(stops, 1):
+        gx, gy = merc(la, lo)
+        axm.plot(gx, gy, "o", ms=13, color="#e08a1e", mec="white", mew=1.2, zorder=7)
+        axm.text(gx, gy, str(i), ha="center", va="center", fontsize=8, fontweight="bold",
+                 color="white", zorder=8)
+        key_lines.append(f"{i}  {nearest(la, lo)} · {(e-s).total_seconds()/60:.0f} min")
+    tx, ty = merc(*templeton)
+    axm.plot(tx, ty, "*", ms=17, color="#c0492f", mec="white", mew=0.8, zorder=7)
+    axm.annotate("Templeton\n(overnight)", (tx, ty), textcoords="offset points", xytext=(9, 0),
+                 ha="left", va="center", fontsize=8.5, fontweight="bold", color="#c0492f", zorder=7,
+                 bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.8))
+    key_lines.append("★  Overnight: Templeton")
+    axm.text(0.52, 0.60, "\n".join(key_lines), transform=axm.transAxes, fontsize=9, va="top",
+             bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#999", alpha=0.92))
     axm.text(0.03, 0.03, f"{tot_mi:.0f} mi · {tot_min/60:.1f} h driving · 2 days", transform=axm.transAxes,
              fontsize=11, fontweight="bold", va="bottom",
              bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#999", alpha=0.9))
@@ -128,6 +152,18 @@ def main():
         f"  {k}: Yao {100*my[k]/mf[k]:.0f}% of Fer" for k in my)
     ax_bot.text(1.03, 0.5, txt, transform=ax_bot.transAxes, fontsize=8.5, va="center",
                 bbox=dict(boxstyle="round,pad=0.4", fc="#f7f7f7", ec="#ccc"))
+
+    # combined speed plot (both days, along route distance) — full width, bottom
+    sat_f, sun_f = frames
+    sat_len = float(sat_f["dist_mi"].iloc[-1])
+    tx_mi = np.concatenate([sat_f["dist_mi"].to_numpy(), sun_f["dist_mi"].to_numpy() + sat_len])
+    tv = np.concatenate([sat_f["speed_mph_s"].to_numpy(), sun_f["speed_mph_s"].to_numpy()])
+    ax_tl.plot(tx_mi, tv, color=_A, lw=0.8)
+    ax_tl.axvline(sat_len, color="0.5", ls="--", lw=1.2)
+    ax_tl.text(sat_len, 90, "  overnight (Templeton)", fontsize=8.5, color="0.4", va="top")
+    ax_tl.set_xlim(0, tx_mi[-1]); ax_tl.set_ylim(0, 95)
+    ax_tl.set_xlabel("distance along route (mi)", fontsize=9.5); ax_tl.set_ylabel("speed (mph)", fontsize=9.5)
+    ax_tl.set_title("Speed across the whole trip — Saturday + Sunday combined", fontsize=11.5)
 
     fig.suptitle("500 miles, two cars, two phones — what consumer GPS reveals about a road trip",
                  fontsize=16, fontweight="bold", y=0.995)
