@@ -119,8 +119,9 @@ def main():
     key_lines.append("★  Overnight: Templeton")
     axm.text(0.52, 0.60, "\n".join(key_lines), transform=axm.transAxes, fontsize=9, va="top",
              bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#999", alpha=0.92))
-    axm.text(0.03, 0.03, f"{tot_mi:.0f} mi · {tot_min/60:.1f} h driving · 2 days", transform=axm.transAxes,
-             fontsize=11, fontweight="bold", va="bottom",
+    drive_min = tot_min - sum((e - s).total_seconds() / 60 for s, e, la, lo in stops)  # exclude breaks
+    axm.text(0.03, 0.03, f"{tot_mi:.0f} mi · {int(drive_min//60)}h {int(round(drive_min % 60)):02d}min driving · 2 days",
+             transform=axm.transAxes, fontsize=11, fontweight="bold", va="bottom",
              bbox=dict(boxstyle="round,pad=0.4", fc="white", ec="#999", alpha=0.9))
     axm.set_title("GPS speed on the road  (purple = slow, green = fast)", fontsize=11)
 
